@@ -45,17 +45,6 @@ The mirrored archives also carry upstream's `watchexec.1` man page, its
 Markdown source, the project logo and shell completions for bash, zsh, fish,
 elvish, nushell and PowerShell alongside the binary.
 
-## Install with ocx
-
-```sh
-ocx install ocx.sh/watchexec/watchexec
-```
-
-```sh
-# or pin a specific version
-ocx install ocx.sh/watchexec/watchexec:2.5.1
-```
-
 ## Links
 
 - [watchexec on GitHub](https://github.com/watchexec/watchexec)
