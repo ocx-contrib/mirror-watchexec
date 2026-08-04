@@ -142,8 +142,8 @@ assets:
     - "^watchexec-.*-x86_64-apple-darwin\\.tar\\.xz$"
   darwin/arm64:
     - "^watchexec-.*-aarch64-apple-darwin\\.tar\\.xz$"
-  # windows/amd64:
-  #   - "^watchexec-.*-x86_64-pc-windows-msvc\\.zip$"
+  windows/amd64:
+    - "^watchexec-.*-x86_64-pc-windows-msvc\\.zip$"
 
 # Every archive — the unix `.tar.xz` and the Windows `.zip` alike — wraps its
 # payload in ONE directory named after the asset itself
