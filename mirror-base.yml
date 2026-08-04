@@ -1,0 +1,113 @@
+# Shared base for every spec in this repository (currently one: watchexec).
+#
+# NOT a spec: it has no name/target/source and is never loaded on its own.
+# Everything a package owns — name, target, source, assets, asset_type,
+# bin_scan, metadata, catalog, tests, versions, announce, annotations — stays
+# in that package's own mirror.yml.
+#
+# ⚠️ `extends:` is a SHALLOW merge of top-level keys. A spec that sets a key
+# below replaces that block OUTRIGHT — there is no per-key merge. `platforms:`
+# is where this bites: it carries BOTH the runner matrix and the container
+# legs, so a child that restates it to tweak one runner silently drops every
+# `containers:` entry. Nothing reds — the legs simply stop existing, and every
+# os.features claim in that spec goes back to being merely asserted. So
+# `platforms:` lives HERE and watchexec/mirror.yml deliberately does not
+# restate it.
+
+skip_prereleases: true
+cascade: true
+
+# The fleet rule for a new package. A cascade tag (`latest`, `X`, `X.Y`)
+# re-points on every re-publish; without a build segment the new manifest
+# reuses the bare version tag and orphans the prior digest for registry GC,
+# breaking any `@sha256:` pin in a consumer's ocx.lock. The `none` exception
+# applies only where upstream versions ALREADY carry semver build metadata
+# (double-stamping is rejected and silently empties the mirror) — watchexec
+# tags bare semver behind a `v` prefix (`v2.5.1` → `2.5.1`), so it does not
+# apply.
+build_timestamp: date
+
+verify:
+  github_asset_digest: true
+
+concurrency:
+  # Assets are ~2.5 MB single-binary .tar.xz archives plus docs, a man page and
+  # shell completions.
+  max_downloads: 8
+  max_bundles: 4
+  max_pushes: 2
+  rate_limit_ms: 100
+  max_retries: 3
+  compression_threads: 0
+
+# ─── Platform matrix ────────────────────────────────────────────────────────
+#
+# `os.features` states what an artifact REQUIRES OF THE HOST — it is not a
+# label for how it was built, and a musl target TRIPLE is not a musl
+# requirement. Upstream ships BOTH `-gnu` and `-musl` Linux assets for amd64
+# and arm64; this mirror carries the musl ones because all four were
+# byte-measured on v2.5.1 (latest) AND on the v2.4.3 floor and are fully
+# STATIC: no PT_INTERP, no DT_NEEDED, no UPX stub (evidence above
+# watchexec/mirror.yml's `assets:`). The gnu builds are dynamically linked
+# against libc.so.6 / libm.so.6 / libgcc_s.so.1 and would need `+libc.glibc`;
+# the static musl build already runs under BOTH userlands, so one bare key per
+# arch covers the ground the two-key split would.
+#
+# A bare key claims universality, so it must prove it: ubuntu (glibc) + alpine
+# (musl) + fedora (different glibc vintage). The alpine leg IS the proof —
+# drop it and the universal claim is merely asserted.
+#
+# No `containers[].setup` anywhere below. The smoke spawns a child through
+# `--shell sh`, and /bin/sh is present in all three stock images (bash in
+# ubuntu/fedora, busybox ash in alpine) — verified by running the mirrored
+# binary's exact smoke invocation inside each image before this landed. A
+# `setup:` line here would provision something the chosen verb never needs and
+# would weaken the "runs on the stock image" claim.
+#
+# ⚠️ STAGED ROLLOUT (Phase 10 — linux first, then darwin, then windows).
+# darwin/windows keys are commented out below AND in watchexec/mirror.yml's
+# `assets:` block, and get uncommented one pass at a time. A declared platform
+# with no matching asset regex does NOT quietly self-skip: it boots a real
+# macos-14 / windows runner and reports SUCCESS having tested nothing. Both
+# halves must be commented, and CI regenerated, per pass.
+#
+# There is NO windows/arm64 pass. Upstream has never shipped an aarch64
+# Windows asset — v2.4.3, v2.5.0 and v2.5.1 each ship exactly one Windows
+# asset, `x86_64-pc-windows-msvc.zip`. So this mirror declares FIVE platforms,
+# not six, and windows/arm64 is genuinely absent rather than staged.
+#
+# A future package here whose libc measurement differs must restate this whole
+# block in its own spec — see the shallow-merge warning at the top.
+platforms:
+  linux/amd64:
+    runner: ubuntu-latest
+    containers:
+      - { image: "ubuntu:24.04", shell: bash }
+      - { image: "alpine:3.20",  shell: sh }
+      - { image: "fedora:40",    shell: bash }
+  linux/arm64:
+    # arm64 container legs run natively — no qemu — so the runner arch must
+    # match the platform or the renderer reds the leg up front.
+    runner: ubuntu-24.04-arm
+    containers:
+      - { image: "ubuntu:24.04", shell: bash }
+      - { image: "alpine:3.20",  shell: sh }
+      - { image: "fedora:40",    shell: bash }
+  # darwin/amd64:
+  #   # Intel slice tested on the arm64 macos-14 runner via Rosetta 2 —
+  #   # GitHub's native macos-13 Intel pool is exhausted and deadlocks push.
+  #   runner: macos-14
+  #   prefix: ["arch", "-x86_64"]
+  # darwin/arm64:
+  #   runner: macos-14
+  #   shell: bash
+  # windows/amd64:
+  #   runner: windows-latest
+  #   shell: pwsh
+  # No `containers:` on darwin or windows — those runners have no Linux
+  # container engine, and the key is rejected at spec load.
+
+notify:
+  discord:
+    webhook_secret: OCX_MIRROR_DISCORD_HOOK
+    user_id: "227748867204972545"  # pinged in-message on failures

@@ -1,0 +1,211 @@
+# ⚠ `extends:` is a SHALLOW merge of TOP-LEVEL KEYS. Setting a key here
+# REPLACES the base's block outright — there is no per-key merge. `platforms:`
+# is deliberately NOT restated below: it carries the container legs that make
+# this spec's bare Linux keys honest, and restating it to tweak one runner
+# would drop them all without reddening anything.
+extends: ../mirror-base.yml
+
+name: watchexec
+
+# Logical index package `watchexec/watchexec` at the physical path
+# `ghcr.io/ocx-contrib/watchexec/watchexec` — slash segments, never
+# hyphen-flattened. Two segments always. `watchexec` is the project's own
+# GitHub org (namespace rule 2: the org IS the project brand), and the package
+# segment is the name the project publishes under — the org, the repo, the
+# crate and the binary are all `watchexec`. The first path segment of
+# `target.repository` must be this repo's own GitHub owner: GITHUB_TOKEN only
+# authorises packages owned by the repo the workflow runs in.
+target:
+  registry: ghcr.io
+  repository: ocx-contrib/watchexec/watchexec
+
+source:
+  type: github_release
+  owner: watchexec
+  repo: watchexec
+  # ⚠ THIS REPOSITORY CARRIES TWO TAG SCHEMES AND ONLY ONE IS THE CLI.
+  #
+  #   vX.Y.Z            — the watchexec CLI. Currently v2.5.1, 128 assets.
+  #   watchexec-vX.Y.Z  — the internal `watchexec` LIBRARY crate. Currently at
+  #                       v8.2.0, a much HIGHER number that reads like "newer".
+  #
+  # The library tags are crates.io publish markers only: they have NO GitHub
+  # Release object at all, and therefore no assets —
+  #
+  #   $ gh api repos/watchexec/watchexec/releases/tags/watchexec-v8.2.0
+  #   {"message":"Not Found", … ,"status":"404"}          (re-verified 2026-08-04)
+  #
+  # so the anchored `^v…$` pattern below is what keeps them out. It also
+  # excludes the sibling `watchexec-cli-vX.Y.Z`-style and `-lib-` tags for the
+  # same reason. The capture group strips the tag's `v` so the published
+  # version is bare semver (`v2.5.1` → `2.5.1`).
+  tag_pattern: "^v(?P<version>\\d+\\.\\d+\\.\\d+)$"
+
+# ─── libc gate (Phase 3.5) — the evidence, not the conclusion ───────────────
+#
+# watchexec is Rust and upstream ships BOTH `-gnu` and `-musl` Linux assets for
+# amd64 and arm64. The triple is not the verdict; the ELF header is. Measured
+# on v2.5.1 (latest) and v2.4.3 (the floor), on both arches:
+#
+#   $ file watchexec-2.5.1-x86_64-unknown-linux-musl/watchexec
+#   ELF 64-bit LSB pie executable, x86-64, static-pie linked, stripped
+#   $ file watchexec-2.5.1-aarch64-unknown-linux-musl/watchexec
+#   ELF 64-bit LSB executable, ARM aarch64, statically linked, stripped
+#   $ file watchexec-2.4.3-x86_64-unknown-linux-musl/watchexec
+#   ELF 64-bit LSB pie executable, x86-64, static-pie linked, stripped
+#   $ file watchexec-2.4.3-aarch64-unknown-linux-musl/watchexec
+#   ELF 64-bit LSB executable, ARM aarch64, statically linked, stripped
+#   $ readelf -l <bin> | grep -c INTERP   → 0        (all four)
+#   $ readelf -d <bin> | grep NEEDED      → (none)   (all four)
+#
+# No PT_INTERP and no DT_NEEDED: musl is linked IN, not linked AGAINST. The
+# UPX cross-check was run too, because a packer stub defeats the readelf gate
+# by leaving no PT_INTERP and no section headers, which makes `file` call even
+# a glibc-dynamic binary "statically linked":
+#
+#   $ strings -a <bin> | grep -c '^UPX'                   → 0      (all four)
+#   $ readelf -h <bin> | grep 'Start of section headers'  → 9291424, 7960056,
+#                                                            9246240, 7894392
+#
+# Non-zero section-header offsets and zero UPX markers: these are genuine
+# unpacked static ELFs, so the "requires nothing" reading is real. Both Linux
+# keys are therefore BARE — no `+libc.*` suffix. Tagging them `+libc.musl`
+# would be a false requirement that hid the package from every glibc host it
+# in fact runs on.
+#
+# The gnu assets were measured too, and are the contrast that makes the choice
+# deliberate rather than incidental:
+#
+#   $ file watchexec-2.5.1-x86_64-unknown-linux-gnu/watchexec
+#   … dynamically linked, interpreter /lib64/ld-linux-x86-64.so.2, for
+#   GNU/Linux 3.2.0, stripped
+#   $ readelf -d … | grep NEEDED  → libgcc_s.so.1, libm.so.6, libc.so.6
+#   $ file watchexec-2.5.1-aarch64-unknown-linux-gnu/watchexec
+#   … dynamically linked, interpreter /lib/ld-linux-aarch64.so.1, …
+#   $ readelf -d … | grep NEEDED  → libgcc_s.so.1, libm.so.6, libc.so.6,
+#                                   ld-linux-aarch64.so.1
+#
+# Those genuinely require glibc and would need `+libc.glibc`. Not carried: the
+# static musl build already runs under BOTH userlands, and the second gnu key
+# earns its keep only where the gnu build reaches capability the musl one
+# lacks — in practice DNS, because musl's resolver ignores nsswitch.conf and
+# loads no NSS modules. watchexec watches the filesystem and spawns child
+# processes; it makes no name-resolution or network calls, so that reason does
+# not apply here. One bare key per arch, and the alpine container leg in
+# ../mirror-base.yml is what turns the universality claim into evidence.
+#
+# ─── Scope (verified on ALL THREE in-range releases: v2.4.3, v2.5.0, v2.5.1) ─
+#
+# Upstream publishes 112 assets per release (128 at v2.5.1). That count is
+# PACKAGE-FORMAT fan-out, not platform fan-out: every Linux target ships
+# `.tar.xz` AND `.deb` AND `.rpm`, and each of those carries `.b3`, `.sha256`
+# and `.sha512` sidecars — up to twelve files for one platform. The `^…$`
+# anchors ending `\.tar\.xz$` / `\.zip$` are what reduce that to exactly one
+# match per key.
+#
+# This mirror deliberately does not carry:
+#   armv7-unknown-linux-gnueabihf   — ocx's Architecture enum is amd64 + arm64
+#   i686-unknown-linux-musl         —   only; none of these four is expressible
+#   powerpc64le-unknown-linux-gnu   —   as a platform key, so there is nothing
+#   s390x-unknown-linux-gnu         —   to declare and nothing to gate.
+#   riscv64gc-unknown-linux-gnu     — same (not expressible), and NEW at v2.5.1
+#   x86_64-unknown-freebsd          — no OCX freebsd OS, and NEW at v2.5.1
+#   *.deb / *.rpm (+ their .b3/.sha256/.sha512 sidecars)
+#                                   — distro packaging, not portable archives
+#   B3SUMS / SHA256SUMS / SHA512SUMS / dist-manifest.json
+#                                   — release metadata, no extension the
+#                                     patterns below can match
+#
+# There is NO windows/arm64 platform in this mirror and none staged for later:
+# upstream ships exactly ONE Windows asset per release,
+# `x86_64-pc-windows-msvc.zip`, at v2.4.3, v2.5.0 and v2.5.1 alike. Declaring
+# the key anyway would boot a windows-11-arm runner that resolves no asset and
+# reports success having tested nothing. So five OCX platforms, not six.
+#
+# Resolution verified BOTH ways on every in-range release: each pattern matches
+# EXACTLY one asset, and no other asset in any release matches any of them. A
+# pattern matching zero is silently skipped, not an error — it would yield a
+# green run with a missing platform. Asset names were also checked to agree
+# with their own tag (an upstream can ship the previous version's binaries
+# under a new tag and everything greens): v2.4.3 assets are all named
+# `watchexec-2.4.3-…`, v2.5.0 `watchexec-2.5.0-…`, v2.5.1 `watchexec-2.5.1-…`.
+#
+# ⚠ STAGED ROLLOUT — darwin/windows keys are commented here AND in
+# ../mirror-base.yml's `platforms:` block; both halves get uncommented together,
+# one pass at a time, with `generate ci` re-run each pass.
+assets:
+  linux/amd64:
+    - "^watchexec-.*-x86_64-unknown-linux-musl\\.tar\\.xz$"
+  linux/arm64:
+    - "^watchexec-.*-aarch64-unknown-linux-musl\\.tar\\.xz$"
+  # darwin/amd64:
+  #   - "^watchexec-.*-x86_64-apple-darwin\\.tar\\.xz$"
+  # darwin/arm64:
+  #   - "^watchexec-.*-aarch64-apple-darwin\\.tar\\.xz$"
+  # windows/amd64:
+  #   - "^watchexec-.*-x86_64-pc-windows-msvc\\.zip$"
+
+# Every archive — the unix `.tar.xz` and the Windows `.zip` alike — wraps its
+# payload in ONE directory named after the asset itself
+# (`watchexec-2.5.1-x86_64-unknown-linux-musl/`), which holds `watchexec`
+# (`watchexec.exe` on Windows) at its top plus LICENSE, README.md, logo.svg,
+# the `watchexec.1` man page, `watchexec.1.md` and a `completions/` dir. There
+# is no `bin/` subdirectory. Verified with `tar tvf` / `unzip -l` on v2.4.3 and
+# v2.5.1, linux + darwin + windows — the layout is identical everywhere, so no
+# per-platform `asset_type.platforms` override is needed and one number serves
+# all five keys.
+#
+# strip_components 1 is therefore FORCED, not chosen: the wrapper directory's
+# name embeds both the version and the target triple, so it differs per
+# platform and per release and cannot be named in a static PATH. Stripping it
+# lands `watchexec` at the content root and one metadata.json
+# (PATH = ${installPath}) serves every platform.
+asset_type:
+  type: archive
+  strip_components: 1
+
+# `off` — FORCED by the layout above, not chosen. The scan only inspects an
+# interface-visible `${installPath}/<dir>` PATH entry, and once the wrapper
+# directory is stripped this archive has no subdirectory to point one at, so
+# both `auto` and `verify` fail spec load at exit 65:
+#
+#   bin_scan is enabled but metadata.json declares no interface-visible
+#   ${installPath}/<dir> PATH entry — the verification would inspect no file and
+#   pass green whatever the archive contains.
+#
+# The `binaries` list in metadata.json is therefore hand-maintained, exactly as
+# that error directs. It is short and stable: `watchexec` (`watchexec.exe` on
+# Windows) is the ONLY mode-0755 entry in the archive — LICENSE, README.md,
+# logo.svg, watchexec.1, watchexec.1.md and every file under completions/ are
+# 0644 data. Quoted so no YAML 1.1 reader folds the bare word into boolean
+# `false`.
+bin_scan: "off"
+
+metadata:
+  default: metadata.json
+
+catalog:
+  logo: logo.svg
+
+versions:
+  min: "2.4.3"
+  new_per_run: 5
+  poll_interval: "48 */6 * * *"
+
+tests:
+  # `script:` resolves from the REPOSITORY ROOT — unlike `metadata.default` and
+  # `catalog.logo` above, which resolve against this spec's own directory.
+  - name: smoke
+    script: watchexec/tests/smoke.star
+
+annotations:
+  # From the Phase 1.5 license gate:
+  #   $ gh api repos/watchexec/watchexec/license --jq '.license.spdx_id'
+  #   Apache-2.0     (holder: "Apache License 2.0", file: LICENSE)
+  org.opencontainers.image.licenses: "Apache-2.0"
+
+announce:
+  # Spelled out, not derived from target.repository — the logical name and the
+  # physical path are related by convention only.
+  package: watchexec/watchexec
+  fork: ocx-contrib/index
