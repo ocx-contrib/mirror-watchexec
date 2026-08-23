@@ -23,21 +23,22 @@ jobs:
           ocx.mkdir("watched")
 
           VARIANTS = [
-              ("baseline", []),
-              ("wrap-none", ["--wrap-process", "none"]),
-              ("stop-timeout-60s", ["--stop-timeout", "60s"]),
-              ("stop-signal-CONT", ["--stop-signal", "SIGCONT"]),
-              ("no-process-group", ["--no-process-group"]),
+              ("baseline", "--shell", "sh"),
+              ("wrap-none", "--wrap-process", "none"),
+              ("stop-timeout-60s", "--stop-timeout", "60s"),
+              ("stop-signal-CONT", "--stop-signal", "SIGCONT"),
+              ("no-process-group", "--no-process-group", "--quiet"),
           ]
 
-          for (label, extra) in VARIANTS:
+          for v in VARIANTS:
+              label = v[0]
               results = []
               for i in range(5):
                   name = "tok-%s-%d.txt" % (label, i)
-                  args = [WX] if False else []
                   r = ocx.run(
-                      "watchexec", "--stdin-quit",
-                      *(extra + ["--shell", "sh", "-w", "watched", "--", "printf OCXSMOKE-OK > " + name]),
+                      "watchexec", "--stdin-quit", v[1], v[2],
+                      "--shell", "sh", "-w", "watched", "--",
+                      "printf OCXSMOKE-OK > " + name,
                       stdin = "",
                       env = ENV,
                   )
