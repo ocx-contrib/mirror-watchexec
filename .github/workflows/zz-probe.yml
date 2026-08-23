@@ -30,25 +30,27 @@ jobs:
               ("no-process-group", "--no-process-group", "--quiet"),
           ]
 
-          for v in VARIANTS:
-              label = v[0]
-              results = []
-              for i in range(5):
-                  name = "tok-%s-%d.txt" % (label, i)
-                  r = ocx.run(
-                      "watchexec", "--stdin-quit", v[1], v[2],
-                      "--shell", "sh", "-w", "watched", "--",
-                      "printf OCXSMOKE-OK > " + name,
-                      stdin = "",
-                      env = ENV,
-                  )
-                  got = ocx.read_file(name) if ocx.exists(name) else "<MISSING>"
-                  results.append("rc=%d body=%r" % (r.exit_code, got))
-              print("VARIANT", label, results)
+          def probe():
+              for v in VARIANTS:
+                  label = v[0]
+                  results = []
+                  for i in range(5):
+                      name = "tok-%s-%d.txt" % (label, i)
+                      r = ocx.run(
+                          "watchexec", "--stdin-quit", v[1], v[2],
+                          "--shell", "sh", "-w", "watched", "--",
+                          "printf OCXSMOKE-OK > " + name,
+                          stdin = "",
+                          env = ENV,
+                      )
+                      got = ocx.read_file(name) if ocx.exists(name) else "<MISSING>"
+                      results.append("rc=%d body=%r" % (r.exit_code, got))
+                  print("VARIANT", label, results)
+              rv = ocx.run("watchexec", "--stdin-quit", "-v", "--shell", "sh", "-w", "watched", "--", "printf OCXSMOKE-OK > verbose.txt", stdin = "", env = ENV)
+              print("VERBOSE rc:", rv.exit_code, "body:", ocx.read_file("verbose.txt") if ocx.exists("verbose.txt") else "<MISSING>")
+              print("VERBOSE stderr:", rv.stderr[-3000:])
 
-          rv = ocx.run("watchexec", "--stdin-quit", "-v", "--shell", "sh", "-w", "watched", "--", "printf OCXSMOKE-OK > verbose.txt", stdin = "", env = ENV)
-          print("VERBOSE rc:", rv.exit_code, "body:", ocx.read_file("verbose.txt") if ocx.exists("verbose.txt") else "<MISSING>")
-          print("VERBOSE stderr:", rv.stderr[-4000:])
+          probe()
           STAR
           VDIR=$(ls -d .ocx-mirror/2.6.1_* 2>/dev/null || echo .ocx-mirror/2.6.1)
           for P in darwin/amd64 darwin/arm64; do
