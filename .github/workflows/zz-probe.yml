@@ -41,10 +41,12 @@ jobs:
           ls2 = ocx.run("/bin/ls", "-la", env = ENV)
           print("ls after:", ls2.stdout)
           STAR
+          VDIR=$(ls -d .ocx-mirror/2.6.1_* 2>/dev/null || echo .ocx-mirror/2.6.1)
+          echo "VDIR=$VDIR"
           for P in darwin/amd64 darwin/arm64; do
             SLUG="${P//\//_}"
-            cp ".ocx-mirror/2.6.1/${SLUG}/metadata.json" ".ocx-mirror/2.6.1/${SLUG}/bundle-metadata.json"
+            cp "${VDIR}/${SLUG}/metadata.json" "${VDIR}/${SLUG}/bundle-metadata.json"
             echo "############ $P"
             ocx package test --platform "$P" --identifier "ghcr.io/ocx-contrib/watchexec/watchexec:2.6.1" \
-              ".ocx-mirror/2.6.1/${SLUG}/bundle.tar.xz" --script "$RUNNER_TEMP/diag.star" || echo "rc=$?"
+              "${VDIR}/${SLUG}/bundle.tar.xz" --script "$RUNNER_TEMP/diag.star" || echo "rc=$?"
           done
