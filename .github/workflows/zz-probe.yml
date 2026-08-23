@@ -43,6 +43,7 @@ jobs:
           STAR
           for P in darwin/amd64 darwin/arm64; do
             SLUG="${P//\//_}"
+            cp ".ocx-mirror/2.6.1/${SLUG}/metadata.json" ".ocx-mirror/2.6.1/${SLUG}/bundle-metadata.json"
             echo "############ $P"
             ocx package test --platform "$P" --identifier "ghcr.io/ocx-contrib/watchexec/watchexec:2.6.1" \
               ".ocx-mirror/2.6.1/${SLUG}/bundle.tar.xz" --script "$RUNNER_TEMP/diag.star" || echo "rc=$?"
