@@ -3,37 +3,47 @@ on: workflow_dispatch
 jobs:
   probe:
     runs-on: macos-14
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
-      - name: probe
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: ocx-sh/setup-ocx@de8e3366f812941423985eaccae28663ef192e8b
+        with:
+          version: "0.5.3"
+      - name: prepare bundles
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -u
-          cd "$RUNNER_TEMP"
-          for v in 2.6.1 2.5.1; do
-            for t in x86_64 aarch64; do
-              curl -sL "https://github.com/watchexec/watchexec/releases/download/v$v/watchexec-$v-$t-apple-darwin.tar.xz" | tar xJf -
-            done
+          set -euo pipefail
+          ocx-mirror package pipeline prepare --spec watchexec/mirror.yml --version 2.6.1
+          ls -R .ocx-mirror | head -40
+      - name: diag script
+        run: |
+          set -uo pipefail
+          cat > "$RUNNER_TEMP/diag.star" <<'STAR'
+          ENV = {"HOME": ocx.scratch_root}
+          print("scratch_root:", ocx.scratch_root)
+          rv = ocx.run("watchexec", "--version", env = ENV)
+          print("version rc:", rv.exit_code, "out:", rv.stdout.strip())
+          ocx.mkdir("watched")
+          r = ocx.run("watchexec", "--stdin-quit", "--shell", "sh", "-w", "watched", "--", "printf OCXSMOKE-OK > token.txt", stdin = "", env = ENV)
+          print("run rc:", r.exit_code)
+          print("run stdout:", r.stdout)
+          print("run stderr:", r.stderr)
+          print("token exists:", ocx.exists("token.txt"))
+          ls = ocx.run("/bin/ls", "-la", env = ENV)
+          print("ls:", ls.stdout)
+          r2 = ocx.run("watchexec", "--stdin-quit", "--shell", "sh", "-w", "watched", "--", "printf OCXSMOKE-OK2 > token2.txt", stdin = "", env = ENV)
+          print("run2 rc:", r2.exit_code, "stdout:", r2.stdout, "exists:", ocx.exists("token2.txt"))
+          r3 = ocx.run("watchexec", "--stdin-quit", "--wrap-process", "none", "--shell", "sh", "-w", "watched", "--", "printf OK3 > token3.txt", stdin = "", env = ENV)
+          print("run3(wrap=none) rc:", r3.exit_code, "stdout:", r3.stdout, "exists:", ocx.exists("token3.txt"))
+          r4 = ocx.run("watchexec", "--stdin-quit", "--stop-timeout", "30s", "--shell", "sh", "-w", "watched", "--", "printf OK4 > token4.txt", stdin = "", env = ENV)
+          print("run4(stop-timeout 30s) rc:", r4.exit_code, "stdout:", r4.stdout, "exists:", ocx.exists("token4.txt"))
+          ls2 = ocx.run("/bin/ls", "-la", env = ENV)
+          print("ls after:", ls2.stdout)
+          STAR
+          for P in darwin/amd64 darwin/arm64; do
+            SLUG="${P//\//_}"
+            echo "############ $P"
+            ocx package test --platform "$P" --identifier "ghcr.io/ocx-contrib/watchexec/watchexec:2.6.1" \
+              ".ocx-mirror/2.6.1/${SLUG}/bundle.tar.xz" --script "$RUNNER_TEMP/diag.star" || echo "rc=$?"
           done
-          mkdir -p run/watched
-          cd run
-          probe() {
-            label="$1"; wx="$2"; mode="$3"
-            rm -f token.txt
-            case "$mode" in
-              pipe)  printf '' | "$wx" --stdin-quit --shell sh -w watched -- 'printf OCXSMOKE-OK > token.txt' >out.txt 2>&1; rc=$? ;;
-              delay) (sleep 2) | "$wx" --stdin-quit --shell sh -w watched -- 'printf OCXSMOKE-OK > token.txt' >out.txt 2>&1; rc=$? ;;
-              null)  "$wx" --stdin-quit --shell sh -w watched -- 'printf OCXSMOKE-OK > token.txt' </dev/null >out.txt 2>&1; rc=$? ;;
-              kill)  "$wx" --shell sh -w watched -- 'printf OCXSMOKE-OK > token.txt' >out.txt 2>&1 & p=$!; sleep 3; kill "$p" 2>/dev/null; wait "$p" 2>/dev/null; rc=$? ;;
-            esac
-            tok=missing; [ -f token.txt ] && tok=present
-            echo "== $label mode=$mode rc=$rc token=$tok"
-            sed 's/^/   | /' out.txt | head -8
-          }
-          for v in 2.6.1 2.5.1; do
-            for t in x86_64 aarch64; do
-              wx="$RUNNER_TEMP/watchexec-$v-$t-apple-darwin/watchexec"
-              arch -x86_64 true 2>/dev/null || true
-              for m in pipe delay null kill; do probe "$v-$t" "$wx" "$m"; done
-            done
-          done
-          echo "== uname: $(uname -m)"
