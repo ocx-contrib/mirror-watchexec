@@ -70,12 +70,34 @@ ocx.mkdir("watched")
 # establish, and it reds against a binary that starts but cannot fork/exec,
 # against a watcher that fails to initialise on this platform, and against a
 # truncated or wrong-flavour archive that still managed to exec.
-r_run = ocx.run(
-    WATCHEXEC, "--stdin-quit", "--shell", SHELL, "-w", "watched", "--", WRITE_OK,
-    stdin = "",
-    env = ENV,
-)
-expect.ok(r_run)
+# ⚠ THE STARTUP RUN RACES THE STDIN-EOF SHUTDOWN, so the invocation is retried.
+# `stdin = ""` closes the pipe before watchexec has finished starting, and a
+# COLD start can process that EOF and tear the command down before the child's
+# write lands. Measured on macos-14 with the darwin/amd64 build (Rosetta), one
+# `ocx package test` per version, three back-to-back invocations each:
+#
+#   v2.6.1  →  token empty, token empty, "OCXSMOKE-OK"
+#   v2.5.1  →  "OCXSMOKE-OK", "OCXSMOKE-OK", "OCXSMOKE-OK"
+#
+# i.e. the first invocations of a freshly translated binary lose the race and
+# leave token.txt EMPTY (in CI, absent — watchexec quit before the shell even
+# opened the redirect); every later invocation writes it in full. darwin/arm64
+# and every Linux leg are 3/3 on both versions — the window only opens where
+# startup is slow. Retrying the whole invocation does NOT weaken the assertion:
+# a binary that cannot spawn a child fails all five attempts and the read below
+# reds exactly as it did before.
+def run_until_token():
+    for _attempt in range(5):
+        r = ocx.run(
+            WATCHEXEC, "--stdin-quit", "--shell", SHELL, "-w", "watched", "--", WRITE_OK,
+            stdin = "",
+            env = ENV,
+        )
+        expect.ok(r)
+        if ocx.exists("token.txt") and "OCXSMOKE-OK" in ocx.read_file("token.txt"):
+            return
+
+run_until_token()
 expect.contains(ocx.read_file("token.txt"), "OCXSMOKE-OK")
 
 # Tier 3b: NEGATIVE CONTROL. Same invocation, one bad argument: a watch path
