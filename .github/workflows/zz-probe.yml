@@ -15,34 +15,41 @@ jobs:
         run: |
           set -euo pipefail
           ocx-mirror package pipeline prepare --spec watchexec/mirror.yml --version 2.6.1
-          ls -R .ocx-mirror | head -40
       - name: diag script
         run: |
           set -uo pipefail
           cat > "$RUNNER_TEMP/diag.star" <<'STAR'
           ENV = {"HOME": ocx.scratch_root}
-          print("scratch_root:", ocx.scratch_root)
-          rv = ocx.run("watchexec", "--version", env = ENV)
-          print("version rc:", rv.exit_code, "out:", rv.stdout.strip())
           ocx.mkdir("watched")
-          r = ocx.run("watchexec", "--stdin-quit", "--shell", "sh", "-w", "watched", "--", "printf OCXSMOKE-OK > token.txt", stdin = "", env = ENV)
-          print("run rc:", r.exit_code)
-          print("run stdout:", r.stdout)
-          print("run stderr:", r.stderr)
-          print("token exists:", ocx.exists("token.txt"))
-          ls = ocx.run("/bin/ls", "-la", env = ENV)
-          print("ls:", ls.stdout)
-          r2 = ocx.run("watchexec", "--stdin-quit", "--shell", "sh", "-w", "watched", "--", "printf OCXSMOKE-OK2 > token2.txt", stdin = "", env = ENV)
-          print("run2 rc:", r2.exit_code, "stdout:", r2.stdout, "exists:", ocx.exists("token2.txt"))
-          r3 = ocx.run("watchexec", "--stdin-quit", "--wrap-process", "none", "--shell", "sh", "-w", "watched", "--", "printf OK3 > token3.txt", stdin = "", env = ENV)
-          print("run3(wrap=none) rc:", r3.exit_code, "stdout:", r3.stdout, "exists:", ocx.exists("token3.txt"))
-          r4 = ocx.run("watchexec", "--stdin-quit", "--stop-timeout", "30s", "--shell", "sh", "-w", "watched", "--", "printf OK4 > token4.txt", stdin = "", env = ENV)
-          print("run4(stop-timeout 30s) rc:", r4.exit_code, "stdout:", r4.stdout, "exists:", ocx.exists("token4.txt"))
-          ls2 = ocx.run("/bin/ls", "-la", env = ENV)
-          print("ls after:", ls2.stdout)
+
+          VARIANTS = [
+              ("baseline", []),
+              ("wrap-none", ["--wrap-process", "none"]),
+              ("stop-timeout-60s", ["--stop-timeout", "60s"]),
+              ("stop-signal-CONT", ["--stop-signal", "SIGCONT"]),
+              ("no-process-group", ["--no-process-group"]),
+          ]
+
+          for (label, extra) in VARIANTS:
+              results = []
+              for i in range(5):
+                  name = "tok-%s-%d.txt" % (label, i)
+                  args = [WX] if False else []
+                  r = ocx.run(
+                      "watchexec", "--stdin-quit",
+                      *(extra + ["--shell", "sh", "-w", "watched", "--", "printf OCXSMOKE-OK > " + name]),
+                      stdin = "",
+                      env = ENV,
+                  )
+                  got = ocx.read_file(name) if ocx.exists(name) else "<MISSING>"
+                  results.append("rc=%d body=%r" % (r.exit_code, got))
+              print("VARIANT", label, results)
+
+          rv = ocx.run("watchexec", "--stdin-quit", "-v", "--shell", "sh", "-w", "watched", "--", "printf OCXSMOKE-OK > verbose.txt", stdin = "", env = ENV)
+          print("VERBOSE rc:", rv.exit_code, "body:", ocx.read_file("verbose.txt") if ocx.exists("verbose.txt") else "<MISSING>")
+          print("VERBOSE stderr:", rv.stderr[-4000:])
           STAR
           VDIR=$(ls -d .ocx-mirror/2.6.1_* 2>/dev/null || echo .ocx-mirror/2.6.1)
-          echo "VDIR=$VDIR"
           for P in darwin/amd64 darwin/arm64; do
             SLUG="${P//\//_}"
             cp "${VDIR}/${SLUG}/metadata.json" "${VDIR}/${SLUG}/bundle-metadata.json"
