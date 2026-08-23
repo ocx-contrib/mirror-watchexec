@@ -1,0 +1,39 @@
+name: zz-probe
+on: workflow_dispatch
+jobs:
+  probe:
+    runs-on: macos-14
+    timeout-minutes: 15
+    steps:
+      - name: probe
+        run: |
+          set -u
+          cd "$RUNNER_TEMP"
+          for v in 2.6.1 2.5.1; do
+            for t in x86_64 aarch64; do
+              curl -sL "https://github.com/watchexec/watchexec/releases/download/v$v/watchexec-$v-$t-apple-darwin.tar.xz" | tar xJf -
+            done
+          done
+          mkdir -p run/watched
+          cd run
+          probe() {
+            label="$1"; wx="$2"; mode="$3"
+            rm -f token.txt
+            case "$mode" in
+              pipe)  printf '' | "$wx" --stdin-quit --shell sh -w watched -- 'printf OCXSMOKE-OK > token.txt' >out.txt 2>&1; rc=$? ;;
+              delay) (sleep 2) | "$wx" --stdin-quit --shell sh -w watched -- 'printf OCXSMOKE-OK > token.txt' >out.txt 2>&1; rc=$? ;;
+              null)  "$wx" --stdin-quit --shell sh -w watched -- 'printf OCXSMOKE-OK > token.txt' </dev/null >out.txt 2>&1; rc=$? ;;
+              kill)  "$wx" --shell sh -w watched -- 'printf OCXSMOKE-OK > token.txt' >out.txt 2>&1 & p=$!; sleep 3; kill "$p" 2>/dev/null; wait "$p" 2>/dev/null; rc=$? ;;
+            esac
+            tok=missing; [ -f token.txt ] && tok=present
+            echo "== $label mode=$mode rc=$rc token=$tok"
+            sed 's/^/   | /' out.txt | head -8
+          }
+          for v in 2.6.1 2.5.1; do
+            for t in x86_64 aarch64; do
+              wx="$RUNNER_TEMP/watchexec-$v-$t-apple-darwin/watchexec"
+              arch -x86_64 true 2>/dev/null || true
+              for m in pipe delay null kill; do probe "$v-$t" "$wx" "$m"; done
+            done
+          done
+          echo "== uname: $(uname -m)"
