@@ -23,7 +23,7 @@ jobs:
           ocx.mkdir("watched")
 
           VARIANTS = [
-              ("baseline", "--shell", "sh"),
+              ("baseline", "--stop-timeout", "10s"),
               ("wrap-none", "--wrap-process", "none"),
               ("stop-timeout-60s", "--stop-timeout", "60s"),
               ("stop-signal-CONT", "--stop-signal", "SIGCONT"),
@@ -31,10 +31,10 @@ jobs:
           ]
 
           def probe():
-              for v in VARIANTS:
-                  label = v[0]
-                  results = []
-                  for i in range(5):
+              tally = {}
+              for i in range(5):
+                  for v in VARIANTS:
+                      label = v[0]
                       name = "tok-%s-%d.txt" % (label, i)
                       r = ocx.run(
                           "watchexec", "--stdin-quit", v[1], v[2],
@@ -44,11 +44,9 @@ jobs:
                           env = ENV,
                       )
                       got = ocx.read_file(name) if ocx.exists(name) else "<MISSING>"
-                      results.append("rc=%d body=%r" % (r.exit_code, got))
-                  print("VARIANT", label, results)
-              rv = ocx.run("watchexec", "--stdin-quit", "-v", "--shell", "sh", "-w", "watched", "--", "printf OCXSMOKE-OK > verbose.txt", stdin = "", env = ENV)
-              print("VERBOSE rc:", rv.exit_code, "body:", ocx.read_file("verbose.txt") if ocx.exists("verbose.txt") else "<MISSING>")
-              print("VERBOSE stderr:", rv.stderr[-3000:])
+                      tally[label] = tally.get(label, []) + ["rc=%d body=%r" % (r.exit_code, got)]
+              for v in VARIANTS:
+                  print("VARIANT", v[0], tally[v[0]])
 
           probe()
           STAR
